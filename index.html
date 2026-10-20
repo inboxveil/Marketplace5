@@ -399,7 +399,25 @@ $('footerCart').onclick=e=>{e.preventDefault();openCart()};
 $('aboutLink').onclick=e=>{e.preventDefault();showToast('SocialMarket is a digital marketplace storefront preview.')};
 $('privacyLink').onclick=e=>{e.preventDefault();showToast('A full privacy policy will be added before launch.')};
 $('helpLink').onclick=e=>{e.preventDefault();showToast('Support contact will be added before launch.')};
-$('checkoutBtn').onclick=()=>{if(!currentUser){openAuth('signin');showToast('Please sign in or create an account before checkout.');return}showToast('You are signed in. Secure payment is not connected yet, so no order or charge was created.');};
+// Paystack checkout frontend bridge. The matching server-side initialize/verify routes
+// must be deployed before this can process payments. Never put a Paystack secret key here.
+const PAYSTACK_BACKEND_URL = 'https://socialmarket-paystack-test-connector-e0pl46.v2.appdeploy.ai';
+$('checkoutBtn').onclick=async()=>{
+ if(!currentUser){openAuth('signin');showToast('Please sign in or create an account before checkout.');return}
+ const items=Object.entries(cart).filter(([id,q])=>q>0&&products.some(p=>p.id===id)).map(([product_id,quantity])=>({product_id,quantity}));
+ if(!items.length){showToast('Your cart is empty.');return}
+ const btn=$('checkoutBtn');const original=btn.textContent;btn.disabled=true;btn.textContent='Preparing secure checkout…';
+ try{
+  const response=await fetch(PAYSTACK_BACKEND_URL+'/api/paystack/initialize',{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({email:currentUser.email,items,callback_url:window.location.origin+window.location.pathname+'?payment=return'})
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok||!data.authorization_url){throw new Error(data.message||'Secure checkout service is not ready yet. Please try again later.')}
+  window.location.assign(data.authorization_url);
+ }catch(error){showToast(error.message||'Could not start checkout. Please try again.');}
+ finally{btn.disabled=false;btn.textContent=original}
+};
 $('adminClose').onclick=closeAdmin;$('saveMarkup').onclick=saveMarkups;
 $('resetMarkup').onclick=()=>{products=DEFAULT_PRODUCTS.map(p=>({...p}));try{localStorage.removeItem('socialmarket-demo-markups')}catch(e){}renderAdmin();renderProducts();renderCart();showToast('Demo prices reset')};
 $('adminModal').addEventListener('click',e=>{if(e.target===$('adminModal'))closeAdmin()});
