@@ -404,13 +404,14 @@ $('helpLink').onclick=e=>{e.preventDefault();showToast('Support contact will be 
 const PAYSTACK_BACKEND_URL = 'https://socialmarket-paystack-test-connector-e0pl46.v2.appdeploy.ai';
 $('checkoutBtn').onclick=async()=>{
  if(!currentUser){openAuth('signin');showToast('Please sign in or create an account before checkout.');return}
- const items=Object.entries(cart).filter(([id,q])=>q>0&&products.some(p=>p.id===id)).map(([product_id,quantity])=>({product_id,quantity}));
+ const items=Object.entries(cart).filter(([id,q])=>q>0&&products.some(p=>p.id===id)).map(([id,quantity])=>({id,quantity}));
+ try{sessionStorage.setItem('socialmarket-pending-items',JSON.stringify(items))}catch(e){}
  if(!items.length){showToast('Your cart is empty.');return}
  const btn=$('checkoutBtn');const original=btn.textContent;btn.disabled=true;btn.textContent='Preparing secure checkout…';
  try{
   const response=await fetch(PAYSTACK_BACKEND_URL+'/api/paystack/initialize',{
    method:'POST',headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({email:currentUser.email,items,callback_url:window.location.origin+window.location.pathname+'?payment=return'})
+   body:JSON.stringify({email:currentUser.email,items})
   });
   const data=await response.json().catch(()=>({}));
   if(!response.ok||!data.authorization_url){throw new Error(data.message||'Secure checkout service is not ready yet. Please try again later.')}
@@ -489,6 +490,29 @@ $('authForm').addEventListener('submit',async e=>{
   message.textContent=messages[error.code]||('Could not complete account action: '+(error.message||'Please try again.'));
  }finally{$('authSubmit').disabled=false}
 });
+async function handlePaystackReturn(){
+ const params=new URLSearchParams(window.location.search);
+ const reference=params.get('reference')||params.get('trxref');
+ if(!reference)return;
+ let items=[];
+ try{items=JSON.parse(sessionStorage.getItem('socialmarket-pending-items')||'[]')}catch(e){}
+ if(!items.length){showToast('Payment returned, but the cart could not be restored. Contact support with your payment reference.');return}
+ try{
+  showToast('Checking your payment securely…');
+  const response=await fetch(PAYSTACK_BACKEND_URL+'/api/paystack/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reference,items})});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok||!data.ok)throw new Error(data.message||'Could not verify payment yet.');
+  if(data.paid){
+   cart={};renderCart();
+   try{sessionStorage.removeItem('socialmarket-pending-items')}catch(e){}
+   showToast('Payment verified successfully! Save your reference: '+reference);
+  }else{
+   showToast('Payment is not confirmed yet. If you completed payment, keep this reference: '+reference);
+  }
+ }catch(error){showToast((error.message||'Payment verification failed.')+' Reference: '+reference)}
+ finally{params.delete('reference');params.delete('trxref');params.delete('payment');const clean=window.location.pathname+(params.toString()?'?'+params.toString():'');window.history.replaceState({},'',clean)}
+}
+
 onAuthStateChanged(auth,user=>{
  currentUser=user;
  $('userStatus').textContent=user?(user.displayName||user.email||'Signed in'):'Not signed in';
@@ -497,6 +521,7 @@ onAuthStateChanged(auth,user=>{
  if(user){$('signedInText').textContent='Signed in as '+(user.displayName||user.email)+'. You can continue shopping; secure payment is still being set up.';}
  if($('authModal').classList.contains('open'))renderAuthMode();
 });
+handlePaystackReturn();
 
 </script>
 </body>
